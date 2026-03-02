@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: trip-expense-api
+    env: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm run server
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+
+  - type: web
+    name: trip-expense-web
+    env: static
+    plan: free
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    autoDeploy: true
+    envVars:
+      - key: VITE_SOCKET_SERVER_URL
+        value: https://trip-expense-api.onrender.com
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
