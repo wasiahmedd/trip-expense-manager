@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host",
+    "start": "node server.cjs",
     "server": "node server.cjs",
+    "postinstall": "node scripts/railway-postinstall.cjs",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",

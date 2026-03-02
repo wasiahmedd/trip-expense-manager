@@ -5,6 +5,9 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 
+const DIST_DIR = path.join(__dirname, 'dist');
+const DIST_INDEX_PATH = path.join(DIST_DIR, 'index.html');
+
 const app = express();
 app.use(cors());
 
@@ -13,6 +16,23 @@ const server = http.createServer(app);
 app.get('/health', (_req, res) => {
     res.send('Server is up and running');
 });
+
+if (fs.existsSync(DIST_INDEX_PATH)) {
+    app.use(express.static(DIST_DIR));
+
+    // Serve SPA routes while keeping health checks and Socket.IO paths intact.
+    app.use((req, res, next) => {
+        if (req.method !== 'GET') return next();
+        if (req.path === '/health' || req.path.startsWith('/socket.io/')) return next();
+        if (path.extname(req.path)) return next();
+
+        res.sendFile(DIST_INDEX_PATH, (err) => {
+            if (err) next(err);
+        });
+    });
+} else {
+    console.warn('Frontend build not found at dist/index.html. Serving API/socket endpoints only.');
+}
 
 const io = new Server(server, {
     cors: {
