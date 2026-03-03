@@ -5,6 +5,8 @@ const safeNumber = (value) => {
 
 const round = (value) => Number(value.toFixed(2));
 
+const money = (value) => `Rs ${safeNumber(value).toFixed(2)}`;
+
 export const normalizePaidBy = (expense) => {
   const amount = safeNumber(expense?.amount);
   const paidBy = expense?.paidBy;
@@ -106,6 +108,7 @@ export const buildTripReport = ({ trip, balances, settlements }) => {
   const lines = [
     '# Trip Spending Document',
     '',
+    `Trip name: ${trip?.tripName || 'Untitled Trip'}`,
     `Trip code: ${trip?.code || 'N/A'}`,
     `Generated at: ${formatTimestamp(new Date().toISOString())}`,
     '',
@@ -162,3 +165,161 @@ export const buildTripReport = ({ trip, balances, settlements }) => {
   return lines.join('\n');
 };
 
+export const calculateParticipantSummary = (trip) => {
+  const participants = trip?.participants || [];
+  const paidTotals = Object.fromEntries(participants.map((participant) => [participant.id, 0]));
+  const shareTotals = Object.fromEntries(participants.map((participant) => [participant.id, 0]));
+
+  (trip?.expenses || []).forEach((expense) => {
+    const amount = safeNumber(expense?.amount);
+    const splitAmong = normalizeSplitAmong(expense);
+    const payers = normalizePaidBy(expense);
+
+    if (amount <= 0 || splitAmong.length === 0 || payers.length === 0) {
+      return;
+    }
+
+    payers.forEach((payer) => {
+      if (paidTotals[payer.id] !== undefined) {
+        paidTotals[payer.id] += safeNumber(payer.amount);
+      }
+    });
+
+    const perHead = amount / splitAmong.length;
+    splitAmong.forEach((personId) => {
+      if (shareTotals[personId] !== undefined) {
+        shareTotals[personId] += perHead;
+      }
+    });
+  });
+
+  return participants.map((participant) => {
+    const paid = round(paidTotals[participant.id] || 0);
+    const share = round(shareTotals[participant.id] || 0);
+    return {
+      id: participant.id,
+      name: participant.name,
+      paid,
+      share,
+      net: round(paid - share)
+    };
+  });
+};
+
+export const buildTripReadableDocument = ({ trip, balances, settlements }) => {
+  const participantsById = Object.fromEntries(
+    (trip?.participants || []).map((participant) => [participant.id, participant.name])
+  );
+
+  const sortedExpenses = [...(trip?.expenses || [])]
+    .sort((a, b) => new Date(a?.date || 0).getTime() - new Date(b?.date || 0).getTime());
+  const totalSpent = sortedExpenses.reduce((sum, expense) => sum + safeNumber(expense.amount), 0);
+  const participantSummary = calculateParticipantSummary(trip);
+
+  const lines = [
+    'TRIP SPENDING DOCUMENT',
+    '======================',
+    '',
+    `Trip name: ${trip?.tripName || 'Untitled Trip'}`,
+    `Trip code: ${trip?.code || 'N/A'}`,
+    `Generated at: ${formatTimestamp(new Date().toISOString())}`,
+    '',
+    '1) Overview',
+    `- People: ${(trip?.participants || []).length}`,
+    `- Expense entries: ${sortedExpenses.length}`,
+    `- Total spent: ${money(totalSpent)}`,
+    '',
+    '2) Person-wise Summary',
+    '- Format: Name | Paid | Share | Net'
+  ];
+
+  participantSummary.forEach((row) => {
+    const sign = row.net >= 0 ? '+' : '';
+    lines.push(`- ${row.name} | ${money(row.paid)} | ${money(row.share)} | ${sign}${money(row.net)}`);
+  });
+
+  lines.push('', '3) Balance Status');
+  Object.entries(balances || {}).forEach(([personId, balance]) => {
+    const name = participantsById[personId] || 'Unknown';
+    const sign = balance >= 0 ? '+' : '';
+    lines.push(`- ${name}: ${sign}${money(balance)}`);
+  });
+
+  lines.push('', '4) Suggested Settlements');
+  if (settlements?.length) {
+    settlements.forEach((settlement) => {
+      lines.push(`- ${settlement.from} pays ${settlement.to}: ${money(settlement.amount)}`);
+    });
+  } else {
+    lines.push('- Everyone is already settled.');
+  }
+
+  lines.push('', '5) Expense Timeline');
+  if (!sortedExpenses.length) {
+    lines.push('- No spending records yet.');
+    return lines.join('\n');
+  }
+
+  sortedExpenses.forEach((expense, index) => {
+    const payers = normalizePaidBy(expense)
+      .map((payer) => `${participantsById[payer.id] || 'Unknown'} (${money(payer.amount)})`)
+      .join(', ');
+    const splitAmong = normalizeSplitAmong(expense)
+      .map((personId) => participantsById[personId] || 'Unknown')
+      .join(', ');
+    lines.push(
+      '',
+      `${index + 1}. ${expense.description || 'General Expense'}`,
+      `   Time: ${formatTimestamp(expense.date)}`,
+      `   Amount: ${money(expense.amount)}`,
+      `   Paid by: ${payers || 'N/A'}`,
+      `   Split among: ${splitAmong || 'N/A'}`,
+      `   Per head: ${money(getExpensePerHead(expense))}`
+    );
+  });
+
+  return lines.join('\n');
+};
+
+const escapeCsv = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+
+export const buildTripExpensesCsv = (trip) => {
+  const participantsById = Object.fromEntries(
+    (trip?.participants || []).map((participant) => [participant.id, participant.name])
+  );
+
+  const header = [
+    'Trip Code',
+    'Date',
+    'Description',
+    'Total Amount',
+    'Paid By',
+    'Split Among',
+    'Per Head'
+  ];
+
+  const rows = [...(trip?.expenses || [])]
+    .sort((a, b) => new Date(a?.date || 0).getTime() - new Date(b?.date || 0).getTime())
+    .map((expense) => {
+      const payers = normalizePaidBy(expense)
+        .map((payer) => `${participantsById[payer.id] || 'Unknown'} (${money(payer.amount)})`)
+        .join('; ');
+      const split = normalizeSplitAmong(expense)
+        .map((personId) => participantsById[personId] || 'Unknown')
+        .join('; ');
+
+      return [
+        trip?.code || 'N/A',
+        formatTimestamp(expense.date),
+        expense.description || 'General Expense',
+        safeNumber(expense.amount).toFixed(2),
+        payers,
+        split,
+        getExpensePerHead(expense).toFixed(2)
+      ];
+    });
+
+  return [header, ...rows]
+    .map((line) => line.map((cell) => escapeCsv(cell)).join(','))
+    .join('\n');
+};

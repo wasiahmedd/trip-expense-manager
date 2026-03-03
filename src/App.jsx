@@ -5,6 +5,7 @@ import AuthScreen from './components/AuthScreen';
 import Onboarding from './components/Onboarding';
 import MinimalDashboard from './components/MinimalDashboard';
 import { auth, hasFirebaseConfig } from './config/firebase';
+import { extractTripCodeFromInput } from './utils/tripLink';
 
 const socket = io(
     import.meta.env.VITE_SOCKET_SERVER_URL ||
@@ -20,6 +21,11 @@ const extractNameFromEmail = (email) => {
 };
 
 function App() {
+    const initialInviteCode = useMemo(() => {
+        if (typeof window === 'undefined') return '';
+        return extractTripCodeFromInput(window.location.search);
+    }, []);
+
     const [trip, setTrip] = useState(null);
     const [myId, setMyId] = useState('');
     const [savedTrips, setSavedTrips] = useState([]);
@@ -28,6 +34,8 @@ function App() {
     const [authReady, setAuthReady] = useState(!hasFirebaseConfig);
     const [error, setError] = useState(null);
     const [notification, setNotification] = useState(null);
+    const [inviteCode, setInviteCode] = useState(initialInviteCode);
+    const [attemptedInviteCode, setAttemptedInviteCode] = useState('');
     const myIdRef = useRef('');
 
     const defaultName = useMemo(() => {
@@ -133,14 +141,14 @@ function App() {
         return normalized;
     };
 
-    const handleCreate = async (userName) => {
+    const handleCreate = async (userName, tripName) => {
         if (!user?.uid) {
             setError('Please sign in and try again.');
             return;
         }
 
         const normalizedName = await persistNameIfNeeded(userName);
-        socket.emit('create-trip', { userName: normalizedName, userUid: user.uid });
+        socket.emit('create-trip', { userName: normalizedName, userUid: user.uid, tripName });
     };
 
     const handleJoin = async (userName, code) => {
@@ -149,8 +157,14 @@ function App() {
             return;
         }
 
+        const normalizedCode = extractTripCodeFromInput(code);
+        if (normalizedCode.length < 6) {
+            setError('Invalid trip link or code.');
+            return;
+        }
+
         const normalizedName = await persistNameIfNeeded(userName);
-        socket.emit('join-trip', { userName: normalizedName, code: code.trim().toUpperCase(), userUid: user.uid });
+        socket.emit('join-trip', { userName: normalizedName, code: normalizedCode, userUid: user.uid });
     };
 
     const handleRejoin = (code) => {
@@ -180,6 +194,29 @@ function App() {
         if (!auth) return;
         await signOut(auth);
     };
+
+    useEffect(() => {
+        if (!authReady || !user?.uid || trip || !inviteCode) return;
+        if (attemptedInviteCode === inviteCode) return;
+
+        setAttemptedInviteCode(inviteCode);
+        handleJoin(defaultName, inviteCode);
+    }, [authReady, user, trip, inviteCode, attemptedInviteCode, defaultName]);
+
+    useEffect(() => {
+        if (!trip?.code || !inviteCode) return;
+        if (trip.code !== inviteCode) return;
+
+        setInviteCode('');
+        setAttemptedInviteCode('');
+
+        if (typeof window !== 'undefined') {
+            const url = new URL(window.location.href);
+            url.searchParams.delete('trip');
+            url.searchParams.delete('code');
+            window.history.replaceState({}, '', url.toString());
+        }
+    }, [trip, inviteCode]);
 
     return (
         <div style={{ minHeight: '100vh', color: 'var(--text-primary)' }}>
@@ -233,6 +270,7 @@ function App() {
                 <Onboarding
                     initialName={defaultName}
                     userEmail={user.email || ''}
+                    prefillCode={inviteCode}
                     savedTrips={savedTrips}
                     onCreate={handleCreate}
                     onJoin={handleJoin}

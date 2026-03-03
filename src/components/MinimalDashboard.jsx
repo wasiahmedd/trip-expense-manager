@@ -11,13 +11,16 @@ import {
     X,
     FileText,
     Download,
+    Copy,
     AlertTriangle,
     Check
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { calculateSettlements } from '../utils/settlementLogic';
 import {
-    buildTripReport,
+    buildTripExpensesCsv,
+    buildTripReadableDocument,
+    calculateParticipantSummary,
     calculateTripBalances,
     formatTimestamp,
     getExpensePerHead,
@@ -25,6 +28,7 @@ import {
     normalizeSplitAmong
 } from '../utils/expenseUtils';
 import { getPersonTheme } from '../utils/personColors';
+import { buildTripShareLink } from '../utils/tripLink';
 
 const parseNumber = (value) => {
     const parsed = parseFloat(value);
@@ -41,9 +45,14 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
     const [description, setDescription] = useState('');
     const [showNotification, setShowNotification] = useState(null);
     const [showQR, setShowQR] = useState(false);
+    const [splitDisplayMode, setSplitDisplayMode] = useState('plain');
 
     const participantNames = useMemo(
         () => Object.fromEntries(trip.participants.map((participant) => [participant.id, participant.name])),
+        [trip.participants]
+    );
+    const participantIndexById = useMemo(
+        () => Object.fromEntries(trip.participants.map((participant, index) => [participant.id, index])),
         [trip.participants]
     );
 
@@ -74,6 +83,65 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
         () => trip.expenses.reduce((sum, expense) => sum + parseNumber(expense.amount), 0),
         [trip.expenses]
     );
+    const participantSummary = useMemo(() => calculateParticipantSummary(trip), [trip]);
+    const documentText = useMemo(
+        () => buildTripReadableDocument({ trip, balances, settlements }),
+        [trip, balances, settlements]
+    );
+    const shareLink = useMemo(() => buildTripShareLink(trip.code), [trip.code]);
+    const tripDateRange = useMemo(() => {
+        const validDates = trip.expenses
+            .map((expense) => new Date(expense?.date || ''))
+            .filter((date) => !Number.isNaN(date.getTime()))
+            .sort((a, b) => a.getTime() - b.getTime());
+
+        if (validDates.length === 0) {
+            return 'No entries yet';
+        }
+
+        const first = formatTimestamp(validDates[0].toISOString());
+        const last = formatTimestamp(validDates[validDates.length - 1].toISOString());
+        return `${first} to ${last}`;
+    }, [trip.expenses]);
+    const mySummary = useMemo(
+        () => participantSummary.find((row) => row.id === myId) || null,
+        [participantSummary, myId]
+    );
+    const personalSettlements = useMemo(
+        () => settlements.filter((settlement) => settlement.fromId === myId || settlement.toId === myId),
+        [settlements, myId]
+    );
+    const personalSettlementActions = useMemo(() => {
+        const relatedExpenseEntries = (otherId) => {
+            const entries = [];
+            for (const expense of sortedExpenses) {
+                const splitIds = normalizeSplitAmong(expense);
+                const payerIds = normalizePaidBy(expense).map((payer) => payer.id);
+                const involved = new Set([...splitIds, ...payerIds]);
+                if (!involved.has(myId) || !involved.has(otherId)) continue;
+
+                const label = expense.description?.trim() || 'General Expense';
+                if (!entries.includes(label)) {
+                    entries.push(label);
+                }
+                if (entries.length === 4) break;
+            }
+            return entries;
+        };
+
+        return personalSettlements.map((settlement) => {
+            const isYouPay = settlement.fromId === myId;
+            const otherId = isYouPay ? settlement.toId : settlement.fromId;
+            const otherName = participantNames[otherId] || (isYouPay ? settlement.to : settlement.from);
+            return {
+                type: isYouPay ? 'pay' : 'collect',
+                otherId,
+                otherName,
+                amount: settlement.amount,
+                relatedEntries: relatedExpenseEntries(otherId)
+            };
+        });
+    }, [personalSettlements, sortedExpenses, myId, participantNames]);
 
     const payerIds = useMemo(() => Object.keys(payerAmounts), [payerAmounts]);
     const hasMultiplePayers = payerIds.length > 1;
@@ -198,18 +266,142 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
         notify('Spending entry saved');
     };
 
-    const downloadReport = () => {
-        const report = buildTripReport({ trip, balances, settlements });
-        const blob = new Blob([report], { type: 'text/markdown;charset=utf-8' });
+    const triggerDownload = (content, fileName, type) => {
+        const blob = new Blob([content], { type });
         const url = URL.createObjectURL(blob);
         const anchor = document.createElement('a');
         anchor.href = url;
-        anchor.download = `trip-${trip.code}-spending-document.md`;
+        anchor.download = fileName;
         document.body.appendChild(anchor);
         anchor.click();
         document.body.removeChild(anchor);
         URL.revokeObjectURL(url);
-        notify('Detailed spending document downloaded');
+    };
+
+    const downloadReadableDocument = () => {
+        triggerDownload(
+            documentText,
+            `trip-${trip.code}-spending-document.txt`,
+            'text/plain;charset=utf-8'
+        );
+        notify('Readable spending document downloaded');
+    };
+
+    const downloadExpenseCsv = () => {
+        const csv = buildTripExpensesCsv(trip);
+        triggerDownload(csv, `trip-${trip.code}-spendings.csv`, 'text/csv;charset=utf-8');
+        notify('Expense CSV downloaded');
+    };
+
+    const copyDocumentText = async () => {
+        try {
+            if (!navigator.clipboard) {
+                throw new Error('Clipboard unavailable');
+            }
+            await navigator.clipboard.writeText(documentText);
+            notify('Document copied to clipboard');
+        } catch {
+            notify('Copy failed. Please use export.');
+        }
+    };
+
+    const copyShareLink = async () => {
+        try {
+            if (!navigator.clipboard) {
+                throw new Error('Clipboard unavailable');
+            }
+            await navigator.clipboard.writeText(shareLink);
+            notify('Trip invite link copied');
+        } catch {
+            notify('Could not copy link');
+        }
+    };
+
+    const shareTripLink = async () => {
+        try {
+            if (navigator.share) {
+                await navigator.share({
+                    title: `Join trip ${trip.code}`,
+                    text: `Join my trip on TripCash. Trip code: ${trip.code}`,
+                    url: shareLink
+                });
+                return;
+            }
+            await copyShareLink();
+        } catch {
+            // Ignore user-cancelled share.
+        }
+    };
+
+    const splitDisplayLabels = {
+        plain: 'Names',
+        tags: 'Tags',
+        color: 'Color Tags'
+    };
+
+    const cycleSplitDisplayMode = () => {
+        setSplitDisplayMode((prev) => {
+            if (prev === 'plain') return 'tags';
+            if (prev === 'tags') return 'color';
+            return 'plain';
+        });
+    };
+
+    const renderSplitAmong = (personIds) => {
+        if (!personIds.length) return 'N/A';
+        if (splitDisplayMode === 'plain') {
+            return personIds.map((personId) => participantNames[personId] || 'Unknown').join(', ');
+        }
+
+        return (
+            <span className="split-tags-wrap">
+                {personIds.map((personId) => {
+                    const name = participantNames[personId] || 'Unknown';
+                    if (splitDisplayMode !== 'color') {
+                        return (
+                            <span key={`split-tag-${personId}`} className="split-tag split-tag-neutral">
+                                {name}
+                            </span>
+                        );
+                    }
+
+                    const theme = getPersonTheme(participantIndexById[personId] || 0);
+                    return (
+                        <span
+                            key={`split-tag-${personId}`}
+                            className="split-tag split-tag-color"
+                            style={{ background: theme.light, borderColor: theme.accent, color: theme.lightText }}
+                        >
+                            {name}
+                        </span>
+                    );
+                })}
+            </span>
+        );
+    };
+
+    const renderPayerTags = (expense) => {
+        const payers = normalizePaidBy(expense);
+        if (!payers.length) return 'N/A';
+
+        return (
+            <span className="payer-tags-wrap">
+                {payers.map((payer, index) => {
+                    const name = participantNames[payer.id] || 'Unknown';
+                    const theme = getPersonTheme(participantIndexById[payer.id] || index);
+                    return (
+                        <span
+                            key={`payer-tag-${expense.id || 'entry'}-${payer.id}-${index}`}
+                            className="payer-tag"
+                            style={{ background: theme.light, color: theme.lightText }}
+                        >
+                            <span>{name}</span>
+                            <span className="payer-tag-amount">{money(payer.amount)}</span>
+                        </span>
+                    );
+                })}
+            </span>
+        );
     };
 
     return (
@@ -220,7 +412,7 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
                 </button>
 
                 <div className="trip-chip">
-                    <span>TRIP CODE {trip.code}</span>
+                    <span>{trip.tripName ? `${trip.tripName} | ${trip.code}` : `TRIP CODE ${trip.code}`}</span>
                     <button onClick={() => setShowQR(true)} aria-label="Share trip code">
                         <Share2 size={14} />
                     </button>
@@ -233,10 +425,21 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
                         <button className="modal-close" onClick={() => setShowQR(false)} aria-label="Close">
                             <X size={24} />
                         </button>
-                        <h2>Share Trip</h2>
-                        <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Scan this QR to join</p>
-                        <div className="qr-container"><QRCodeSVG value={trip.code} size={200} /></div>
-                        <p style={{ marginTop: '12px', fontWeight: 800, letterSpacing: '2px' }}>{trip.code}</p>
+                        <h2>{trip.tripName ? `Share ${trip.tripName}` : 'Share Trip Link'}</h2>
+                        <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Scan or open this link to join directly.</p>
+                        <div className="qr-container"><QRCodeSVG value={shareLink} size={200} /></div>
+                        <p style={{ marginTop: '10px', fontWeight: 800, letterSpacing: '2px' }}>{trip.code}</p>
+                        <div className="share-link-box">
+                            <input value={shareLink} readOnly />
+                            <div className="share-link-actions">
+                                <button className="btn btn-secondary" onClick={copyShareLink}>
+                                    <Copy size={15} /> Copy Link
+                                </button>
+                                <button className="btn btn-primary" onClick={shareTripLink}>
+                                    <Share2 size={15} /> Share
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}
@@ -426,6 +629,43 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
                                 Everyone is settled.
                             </div>
                         )}
+
+                        <h3 className="section-title">FOR YOU: WHO TO PAY / WHO PAYS YOU</h3>
+                        <div className="glass-panel my-settlement-summary">
+                            <p>
+                                {mySummary
+                                    ? `You paid ${money(mySummary.paid)}, your share is ${money(mySummary.share)}, so your net is ${mySummary.net >= 0 ? '+' : ''}${money(mySummary.net)}.`
+                                    : 'Join a trip to see your personal settlement summary.'}
+                            </p>
+                        </div>
+                        {personalSettlementActions.length > 0 ? personalSettlementActions.map((action, index) => (
+                            <div
+                                key={`my-settlement-${action.type}-${action.otherId || index}`}
+                                className={`glass-panel my-settlement-row ${action.type === 'pay' ? 'my-settlement-pay' : 'my-settlement-collect'}`}
+                            >
+                                <div className="my-settlement-main">
+                                    <p className="my-settlement-title">
+                                        {action.type === 'pay'
+                                            ? `You should pay ${action.otherName}`
+                                            : `${action.otherName} should pay you`}
+                                    </p>
+                                    <strong>{money(action.amount)}</strong>
+                                </div>
+                                {action.relatedEntries.length > 0 && (
+                                    <div className="my-settlement-entry-tags">
+                                        {action.relatedEntries.map((entryName, tagIndex) => (
+                                            <span key={`entry-tag-${action.otherId || 'x'}-${tagIndex}`} className="my-settlement-entry-tag">
+                                                {entryName}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )) : (
+                            <div className="glass-panel" style={{ padding: '14px', color: 'var(--text-secondary)' }}>
+                                No pending settlement for you right now.
+                            </div>
+                        )}
                     </>
                 )}
 
@@ -433,14 +673,72 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
                     <>
                         <div className="glass-panel doc-head">
                             <div>
-                                <h3>Spending Document</h3>
-                                <p>Auto-updated with timing, amount, payer split, and participants.</p>
+                                <h3>Trip Spending Document</h3>
+                                <p>Simple summary for non-technical users. View here or export as text/CSV.</p>
                             </div>
-                            <button className="btn btn-secondary" onClick={downloadReport}>
-                                <Download size={16} /> Export
-                            </button>
+                            <div className="doc-actions">
+                                <button className="btn btn-secondary" onClick={copyDocumentText}>
+                                    <Copy size={16} /> Copy
+                                </button>
+                                <button className="btn btn-secondary" onClick={downloadReadableDocument}>
+                                    <Download size={16} /> TXT
+                                </button>
+                                <button className="btn btn-secondary" onClick={downloadExpenseCsv}>
+                                    <Download size={16} /> CSV
+                                </button>
+                            </div>
                         </div>
 
+                        <div className="doc-overview-grid">
+                            <div className="glass-panel doc-stat-card">
+                                <p>Total Spent</p>
+                                <strong>{money(totalSpent)}</strong>
+                            </div>
+                            <div className="glass-panel doc-stat-card">
+                                <p>Expense Entries</p>
+                                <strong>{sortedExpenses.length}</strong>
+                            </div>
+                            <div className="glass-panel doc-stat-card">
+                                <p>Participants</p>
+                                <strong>{trip.participants.length}</strong>
+                            </div>
+                            <div className="glass-panel doc-stat-card">
+                                <p>Trip Timeline</p>
+                                <strong>{tripDateRange}</strong>
+                            </div>
+                        </div>
+
+                        <div className="glass-panel doc-summary-panel">
+                            <div className="doc-summary-headline">
+                                <h3>Person-wise Summary</h3>
+                                <p>Paid = how much person spent. Share = how much they should pay. Net = Paid - Share.</p>
+                            </div>
+                            <div className="doc-summary-row doc-summary-row-head">
+                                <span>Person</span>
+                                <span>Paid</span>
+                                <span>Share</span>
+                                <span>Net</span>
+                            </div>
+                            {participantSummary.map((row) => (
+                                <div key={`doc-summary-${row.id}`} className="doc-summary-row">
+                                    <span>{row.name}</span>
+                                    <span>{money(row.paid)}</span>
+                                    <span>{money(row.share)}</span>
+                                    <span
+                                        className={row.net >= 0 ? 'doc-net-positive' : 'doc-net-negative'}
+                                    >
+                                        {row.net >= 0 ? '+' : ''}{money(row.net)}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="timeline-head">
+                            <h3 className="section-title">EXPENSE TIMELINE</h3>
+                            <button className="split-view-toggle" onClick={cycleSplitDisplayMode}>
+                                Split View: {splitDisplayLabels[splitDisplayMode]}
+                            </button>
+                        </div>
                         {sortedExpenses.length === 0 && (
                             <div className="glass-panel" style={{ padding: '20px', color: 'var(--text-secondary)', textAlign: 'center' }}>
                                 No spending records yet.
@@ -448,23 +746,20 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
                         )}
 
                         {sortedExpenses.map((expense, index) => {
-                            const payers = normalizePaidBy(expense)
-                                .map((payer) => `${participantNames[payer.id] || 'Unknown'} (${money(payer.amount)})`)
-                                .join(', ');
-                            const split = normalizeSplitAmong(expense)
-                                .map((personId) => participantNames[personId] || 'Unknown')
-                                .join(', ');
+                            const splitIds = normalizeSplitAmong(expense);
                             return (
                                 <div key={expense.id || index} className="glass-panel doc-row">
                                     <div className="doc-row-top">
                                         <div>
-                                            <p className="doc-title">{expense.description || 'General Expense'}</p>
+                                            <p className="doc-title">
+                                                #{sortedExpenses.length - index} {expense.description || 'General Expense'}
+                                            </p>
                                             <p className="doc-time">{formatTimestamp(expense.date)}</p>
                                         </div>
                                         <strong>{money(parseNumber(expense.amount))}</strong>
                                     </div>
-                                    <p><strong>Paid by:</strong> {payers || 'N/A'}</p>
-                                    <p><strong>Split among:</strong> {split || 'N/A'}</p>
+                                    <p><strong>Paid by:</strong> {renderPayerTags(expense)}</p>
+                                    <p><strong>Split among:</strong> {renderSplitAmong(splitIds)}</p>
                                     <p><strong>Per head:</strong> {money(getExpensePerHead(expense))}</p>
                                 </div>
                             );

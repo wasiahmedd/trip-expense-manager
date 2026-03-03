@@ -31,7 +31,9 @@ export const calculateSettlements = (balances, people) => {
         const amount = Math.min(debtors[i].amount, creditors[j].amount);
 
         transactions.push({
+            fromId: debtors[i].id,
             from: personMap[debtors[i].id],
+            toId: creditors[j].id,
             to: personMap[creditors[j].id],
             amount: Number(amount.toFixed(2))
         });

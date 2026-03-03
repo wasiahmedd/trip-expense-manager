@@ -98,6 +98,17 @@ const sanitizeCode = (value) => {
     return value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
 };
 
+const sanitizeTripName = (value, fallbackCode = '') => {
+    if (typeof value !== 'string') {
+        return fallbackCode ? `Trip ${fallbackCode}` : 'Untitled Trip';
+    }
+    const trimmed = value.trim().replace(/\s+/g, ' ');
+    if (!trimmed) {
+        return fallbackCode ? `Trip ${fallbackCode}` : 'Untitled Trip';
+    }
+    return trimmed.slice(0, 60);
+};
+
 const ensureUniqueCode = () => {
     let code = generateCode();
     while (trips[code]) {
@@ -164,6 +175,7 @@ const summarizeTrip = (code, role) => {
     const totalSpent = trip.expenses.reduce((sum, expense) => sum + toNumber(expense.amount), 0);
     return {
         code: trip.code,
+        tripName: sanitizeTripName(trip.tripName, trip.code),
         role,
         participantsCount: Array.isArray(trip.participants) ? trip.participants.length : 0,
         expensesCount: Array.isArray(trip.expenses) ? trip.expenses.length : 0,
@@ -245,7 +257,7 @@ const upsertParticipant = (trip, { uid, userName, fallbackId }) => {
 io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
 
-    socket.on('create-trip', ({ userName, userUid }) => {
+    socket.on('create-trip', ({ userName, userUid, tripName }) => {
         if (!userUid) {
             socket.emit('error', 'Authentication required. Please log in again.');
             return;
@@ -259,6 +271,7 @@ io.on('connection', (socket) => {
 
         trips[code] = {
             code,
+            tripName: sanitizeTripName(tripName, code),
             ownerUid: userUid,
             participants: [participant],
             expenses: [],
@@ -287,6 +300,9 @@ io.on('connection', (socket) => {
             socket.emit('error', 'Trip not found');
             return;
         }
+        if (!trip.tripName) {
+            trip.tripName = sanitizeTripName('', normalizedCode);
+        }
 
         const normalizedName = sanitizeName(userName) || 'Trip User';
         const participantId = upsertParticipant(trip, { uid: userUid, userName: normalizedName, fallbackId: socket.id });
@@ -313,6 +329,9 @@ io.on('connection', (socket) => {
         if (!trip) {
             socket.emit('error', 'Trip not found');
             return;
+        }
+        if (!trip.tripName) {
+            trip.tripName = sanitizeTripName('', normalizedCode);
         }
 
         const normalizedName = sanitizeName(userName) || 'Trip User';

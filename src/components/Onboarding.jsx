@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Camera, LogIn, LogOut, Plus, RotateCcw, X } from 'lucide-react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
-
-const sanitizeCode = (value) => value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+import { extractTripCodeFromInput } from '../utils/tripLink';
 
 const formatDate = (value) => {
     if (!value) return 'Unknown';
@@ -11,9 +10,10 @@ const formatDate = (value) => {
     return parsed.toLocaleString();
 };
 
-const Onboarding = ({ onJoin, onCreate, onRejoin, onLogout, initialName, userEmail, savedTrips = [] }) => {
+const Onboarding = ({ onJoin, onCreate, onRejoin, onLogout, initialName, userEmail, savedTrips = [], prefillCode = '' }) => {
     const [name, setName] = useState(initialName || '');
-    const [code, setCode] = useState('');
+    const [tripName, setTripName] = useState('');
+    const [code, setCode] = useState(extractTripCodeFromInput(prefillCode));
     const [isJoining, setIsJoining] = useState(false);
     const [isScanning, setIsScanning] = useState(false);
 
@@ -31,7 +31,7 @@ const Onboarding = ({ onJoin, onCreate, onRejoin, onLogout, initialName, userEma
             });
 
             scanner.render((decodedText) => {
-                setCode(sanitizeCode(decodedText));
+                setCode(extractTripCodeFromInput(decodedText));
                 setIsScanning(false);
                 scanner.clear();
             }, () => {
@@ -46,15 +46,24 @@ const Onboarding = ({ onJoin, onCreate, onRejoin, onLogout, initialName, userEma
         };
     }, [isScanning]);
 
+    useEffect(() => {
+        const parsed = extractTripCodeFromInput(prefillCode);
+        if (parsed.length === 6) {
+            setCode(parsed);
+            setIsJoining(true);
+        }
+    }, [prefillCode]);
+
     const handleCreate = () => {
         const normalizedName = name.trim();
-        if (!normalizedName) return;
-        onCreate(normalizedName);
+        const normalizedTripName = tripName.trim();
+        if (!normalizedName || !normalizedTripName) return;
+        onCreate(normalizedName, normalizedTripName);
     };
 
     const handleJoin = () => {
         const normalizedName = name.trim();
-        const normalizedCode = sanitizeCode(code);
+        const normalizedCode = extractTripCodeFromInput(code);
         if (!normalizedName || normalizedCode.length < 6) return;
         onJoin(normalizedName, normalizedCode);
     };
@@ -101,10 +110,18 @@ const Onboarding = ({ onJoin, onCreate, onRejoin, onLogout, initialName, userEma
 
                 {!isJoining ? (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '12px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            <label style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>Trip Name</label>
+                            <input
+                                value={tripName}
+                                onChange={(event) => setTripName(event.target.value)}
+                                placeholder="e.g. Goa Friends Trip"
+                            />
+                        </div>
                         <button
                             className="btn btn-primary"
                             onClick={handleCreate}
-                            disabled={!name.trim()}
+                            disabled={!name.trim() || !tripName.trim()}
                             style={{ justifyContent: 'center' }}
                         >
                             <Plus size={20} /> Create New Trip
@@ -124,9 +141,8 @@ const Onboarding = ({ onJoin, onCreate, onRejoin, onLogout, initialName, userEma
                             <div style={{ position: 'relative' }}>
                                 <input
                                     value={code}
-                                    onChange={(event) => setCode(sanitizeCode(event.target.value))}
-                                    placeholder="6-DIGIT CODE"
-                                    maxLength={6}
+                                    onChange={(event) => setCode(extractTripCodeFromInput(event.target.value))}
+                                    placeholder="Trip code or invite link"
                                     style={{ width: '100%', textAlign: 'center', letterSpacing: '4px', fontSize: '20px', paddingRight: '48px' }}
                                 />
                                 <button
@@ -166,6 +182,7 @@ const Onboarding = ({ onJoin, onCreate, onRejoin, onLogout, initialName, userEma
                         {sortedTrips.map((savedTrip) => (
                             <div key={`${savedTrip.code}-${savedTrip.role}`} className="saved-trip-row">
                                 <div>
+                                    {savedTrip.tripName && <p className="saved-trip-name">{savedTrip.tripName}</p>}
                                     <p className="saved-trip-code">{savedTrip.code}</p>
                                     <p className="saved-trip-meta">
                                         {savedTrip.role === 'created' ? 'Created by you' : 'Joined'} | {savedTrip.participantsCount} members
