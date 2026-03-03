@@ -20,7 +20,10 @@ const extractNameFromEmail = (email) => {
 
 const AuthScreen = () => {
     const isNativePlatform = Capacitor.isNativePlatform();
-    const canUseNativeGoogle = isNativePlatform && hasNativeGoogleClientId;
+    const isNativeFirebaseAuthAvailable =
+        !isNativePlatform || Capacitor.isPluginAvailable('FirebaseAuthentication');
+    const canUseNativeGoogle =
+        isNativePlatform && hasNativeGoogleClientId && isNativeFirebaseAuthAvailable;
     const [mode, setMode] = useState('login');
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
@@ -44,6 +47,9 @@ const AuthScreen = () => {
         }
         if (message.includes('auth/popup-blocked')) return 'Popup blocked. Allow popups and try Google login again.';
         if (message.includes('auth/popup-closed-by-user')) return 'Google sign-in cancelled.';
+        if (message.includes('plugin is not implemented on android')) {
+            return 'This APK does not include native Google auth plugin. Install the latest APK build.';
+        }
         if (message.includes('missing initial state')) {
             return 'Google sign-in redirect failed in this environment. Please use email/password in the APK.';
         }
@@ -80,6 +86,10 @@ const AuthScreen = () => {
 
     const handleGoogleLogin = async () => {
         if (!hasFirebaseConfig || !auth || !googleProvider) return;
+        if (isNativePlatform && !isNativeFirebaseAuthAvailable) {
+            setError('This APK is outdated for Google login. Install the latest APK build.');
+            return;
+        }
 
         setError('');
         setIsBusy(true);
@@ -142,7 +152,12 @@ const AuthScreen = () => {
                         Firebase config missing. Add `VITE_FIREBASE_*` values in `.env` to enable login.
                     </div>
                 )}
-                {isNativePlatform && !canUseNativeGoogle && (
+                {isNativePlatform && !isNativeFirebaseAuthAvailable && (
+                    <div className="auth-alert">
+                        This installed APK is missing native Google auth plugin. Reinstall latest APK.
+                    </div>
+                )}
+                {isNativePlatform && isNativeFirebaseAuthAvailable && !canUseNativeGoogle && (
                     <div className="auth-alert">
                         Native Google login needs `VITE_FIREBASE_GOOGLE_WEB_CLIENT_ID` in APK build env.
                     </div>

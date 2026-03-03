@@ -238,7 +238,7 @@ function App() {
 
     const handleLogout = async () => {
         if (!auth) return;
-        if (isNativePlatform) {
+        if (isNativePlatform && Capacitor.isPluginAvailable('FirebaseAuthentication')) {
             try {
                 await FirebaseAuthentication.signOut();
             } catch {
