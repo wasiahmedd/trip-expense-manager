@@ -17,6 +17,12 @@ const pickCodeCandidate = (url) => {
   return '';
 };
 
+const buildQueryLink = (baseUrl, tripCode) => {
+  const url = new URL(baseUrl);
+  url.searchParams.set('trip', tripCode);
+  return url.toString();
+};
+
 export const extractTripCodeFromInput = (value) => {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -35,6 +41,10 @@ export const extractTripCodeFromInput = (value) => {
     const code = sanitizeTripCode(pickCodeCandidate(url));
     return code.length === 6 ? code : '';
   } catch {
+    if (typeof window === 'undefined') {
+      return sanitizeTripCode(raw);
+    }
+
     try {
       const normalized = raw.startsWith('/') ? raw : `/${raw}`;
       const url = new URL(normalized, window.location.origin);
@@ -63,8 +73,14 @@ export const buildTripShareLink = (tripCode) => {
   }
 
   if (!normalizedCode) return baseUrl;
+  if (!baseUrl) return `?trip=${normalizedCode}`;
 
-  const url = new URL(baseUrl);
-  url.searchParams.set('trip', normalizedCode);
-  return url.toString();
+  return buildQueryLink(baseUrl, normalizedCode);
+};
+
+export const buildTripAppLink = (tripCode) => {
+  const normalizedCode = sanitizeTripCode(tripCode);
+  const baseLink = 'tripcash://join';
+  if (!normalizedCode) return baseLink;
+  return buildQueryLink(baseLink, normalizedCode);
 };

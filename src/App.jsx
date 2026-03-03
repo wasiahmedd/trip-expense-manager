@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
+import { Capacitor } from '@capacitor/core';
+import { App as CapacitorApp } from '@capacitor/app';
 import { onAuthStateChanged, signOut, updateProfile } from 'firebase/auth';
 import AuthScreen from './components/AuthScreen';
 import Onboarding from './components/Onboarding';
@@ -21,6 +23,7 @@ const extractNameFromEmail = (email) => {
 };
 
 function App() {
+    const isNativePlatform = useMemo(() => Capacitor.isNativePlatform(), []);
     const initialInviteCode = useMemo(() => {
         if (typeof window === 'undefined') return '';
         return extractTripCodeFromInput(window.location.search);
@@ -47,6 +50,48 @@ function App() {
     useEffect(() => {
         myIdRef.current = myId;
     }, [myId]);
+
+    useEffect(() => {
+        if (!isNativePlatform) return undefined;
+
+        const applyInviteFromUrl = (incomingUrl) => {
+            const parsedCode = extractTripCodeFromInput(incomingUrl);
+            if (parsedCode.length !== 6) return;
+            setInviteCode(parsedCode);
+            setAttemptedInviteCode('');
+        };
+
+        let listenerHandle = null;
+        let alive = true;
+
+        CapacitorApp.getLaunchUrl()
+            .then((launch) => {
+                if (!alive) return;
+                if (launch?.url) {
+                    applyInviteFromUrl(launch.url);
+                }
+            })
+            .catch(() => {
+                // Ignore launch URL read errors on unsupported platforms.
+            });
+
+        CapacitorApp.addListener('appUrlOpen', (event) => {
+            applyInviteFromUrl(event?.url || '');
+        })
+            .then((handle) => {
+                listenerHandle = handle;
+            })
+            .catch(() => {
+                // Ignore listener setup failure on unsupported platforms.
+            });
+
+        return () => {
+            alive = false;
+            if (listenerHandle) {
+                listenerHandle.remove();
+            }
+        };
+    }, [isNativePlatform]);
 
     useEffect(() => {
         const handleConnect = () => {

@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Camera, LogIn, LogOut, Plus, RotateCcw, X } from 'lucide-react';
-import { Html5QrcodeScanner } from 'html5-qrcode';
+import { Html5Qrcode } from 'html5-qrcode';
 import { extractTripCodeFromInput } from '../utils/tripLink';
 
 const formatDate = (value) => {
@@ -16,35 +16,97 @@ const Onboarding = ({ onJoin, onCreate, onRejoin, onLogout, initialName, userEma
     const [code, setCode] = useState(extractTripCodeFromInput(prefillCode));
     const [isJoining, setIsJoining] = useState(false);
     const [isScanning, setIsScanning] = useState(false);
+    const [scannerError, setScannerError] = useState('');
+    const scannerRef = useRef(null);
 
     const sortedTrips = useMemo(() => {
         return [...savedTrips].sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
     }, [savedTrips]);
 
-    useEffect(() => {
-        let scanner = null;
-        if (isScanning) {
-            scanner = new Html5QrcodeScanner('reader', {
-                fps: 10,
-                qrbox: { width: 250, height: 250 },
-                aspectRatio: 1.0
-            });
+    const stopScanner = useCallback(async () => {
+        const scanner = scannerRef.current;
+        scannerRef.current = null;
+        if (!scanner) return;
 
-            scanner.render((decodedText) => {
-                setCode(extractTripCodeFromInput(decodedText));
-                setIsScanning(false);
-                scanner.clear();
-            }, () => {
-                // Ignore scanner errors
-            });
+        try {
+            if (scanner.isScanning) {
+                await scanner.stop();
+            }
+        } catch {
+            // Ignore stop errors during teardown.
         }
 
-        return () => {
-            if (scanner) {
-                scanner.clear().catch((err) => console.error('Failed to clear scanner', err));
+        try {
+            await scanner.clear();
+        } catch {
+            // Ignore clear errors during teardown.
+        }
+    }, []);
+
+    const mapScannerError = (error) => {
+        const message = String(error?.message || error || '');
+        if (message.includes('NotAllowedError')) {
+            return 'Camera permission denied. Enable camera permission for TripCash in Android app settings.';
+        }
+        if (message.includes('NotFoundError') || message.includes('OverconstrainedError')) {
+            return 'No usable camera found on this device.';
+        }
+        if (message.includes('NotReadableError')) {
+            return 'Camera is busy in another app. Close other camera apps and try again.';
+        }
+        if (message.includes('insecure context')) {
+            return 'Camera requires secure context. Please use the installed app build.';
+        }
+        return 'Could not start QR scanner. Please paste trip link/code manually.';
+    };
+
+    useEffect(() => {
+        if (!isScanning) {
+            stopScanner();
+            return undefined;
+        }
+
+        let alive = true;
+        setScannerError('');
+
+        const startScanner = async () => {
+            try {
+                if (!navigator.mediaDevices?.getUserMedia) {
+                    throw new Error('MediaDevices API not available');
+                }
+
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                stream.getTracks().forEach((track) => track.stop());
+
+                if (!alive) return;
+
+                const scanner = new Html5Qrcode('reader');
+                scannerRef.current = scanner;
+                await scanner.start(
+                    { facingMode: 'environment' },
+                    { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 },
+                    (decodedText) => {
+                        setCode(extractTripCodeFromInput(decodedText));
+                        setIsScanning(false);
+                    },
+                    () => {
+                        // Ignore scan misses.
+                    }
+                );
+            } catch (err) {
+                if (!alive) return;
+                setScannerError(mapScannerError(err));
+                stopScanner();
             }
         };
-    }, [isScanning]);
+
+        startScanner();
+
+        return () => {
+            alive = false;
+            stopScanner();
+        };
+    }, [isScanning, stopScanner]);
 
     useEffect(() => {
         const parsed = extractTripCodeFromInput(prefillCode);
@@ -212,6 +274,7 @@ const Onboarding = ({ onJoin, onCreate, onRejoin, onLogout, initialName, userEma
                             <div id="reader"></div>
                         </div>
                         <p style={{ marginTop: '16px', color: 'var(--text-secondary)', fontSize: '14px' }}>Center the QR code in the box to scan</p>
+                        {scannerError && <p className="scanner-error">{scannerError}</p>}
                     </div>
                 </div>
             )}

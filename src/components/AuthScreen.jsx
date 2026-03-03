@@ -6,6 +6,7 @@ import {
     signInWithPopup,
     updateProfile
 } from 'firebase/auth';
+import { Capacitor } from '@capacitor/core';
 import { Lock, LogIn, Mail, User, UserPlus } from 'lucide-react';
 import { auth, googleProvider, hasFirebaseConfig } from '../config/firebase';
 
@@ -15,6 +16,7 @@ const extractNameFromEmail = (email) => {
 };
 
 const AuthScreen = () => {
+    const isNativePlatform = Capacitor.isNativePlatform();
     const [mode, setMode] = useState('login');
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
@@ -37,6 +39,9 @@ const AuthScreen = () => {
             return 'Firebase auth provider is not configured. Enable Email/Password and Google in Firebase Authentication, then restart the app.';
         }
         if (message.includes('auth/popup-blocked')) return 'Popup blocked. Allow popups and try Google login again.';
+        if (message.includes('missing initial state')) {
+            return 'Google sign-in redirect failed in this environment. Please use email/password in the APK.';
+        }
         return message.replace('Firebase: ', '');
     };
 
@@ -64,6 +69,10 @@ const AuthScreen = () => {
 
     const handleGoogleLogin = async () => {
         if (!hasFirebaseConfig || !auth || !googleProvider) return;
+        if (isNativePlatform) {
+            setError('Google sign-in is not supported in this APK build yet. Use email/password for now.');
+            return;
+        }
 
         setError('');
         setIsBusy(true);
@@ -94,6 +103,11 @@ const AuthScreen = () => {
                 {!hasFirebaseConfig && (
                     <div className="auth-alert">
                         Firebase config missing. Add `VITE_FIREBASE_*` values in `.env` to enable login.
+                    </div>
+                )}
+                {isNativePlatform && (
+                    <div className="auth-alert">
+                        Google sign-in is disabled in this APK build. Please use email + password.
                     </div>
                 )}
 
@@ -158,7 +172,7 @@ const AuthScreen = () => {
 
                 <div className="auth-divider"><span>or</span></div>
 
-                <button className="btn btn-secondary auth-google-btn" onClick={handleGoogleLogin} disabled={isBusy || !hasFirebaseConfig}>
+                <button className="btn btn-secondary auth-google-btn" onClick={handleGoogleLogin} disabled={isBusy || !hasFirebaseConfig || isNativePlatform}>
                     <img
                         src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
                         alt="Google"

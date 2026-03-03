@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import {
     ChevronLeft,
     IndianRupee,
@@ -27,7 +28,7 @@ import {
     normalizeSplitAmong
 } from '../utils/expenseUtils';
 import { getPersonTheme } from '../utils/personColors';
-import { buildTripShareLink } from '../utils/tripLink';
+import { buildTripAppLink, buildTripShareLink } from '../utils/tripLink';
 import CopyButton from './CopyButton';
 
 const parseNumber = (value) => {
@@ -88,7 +89,19 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
         () => buildTripReadableDocument({ trip, balances, settlements }),
         [trip, balances, settlements]
     );
+    const isNativePlatform = useMemo(() => Capacitor.isNativePlatform(), []);
     const shareLink = useMemo(() => buildTripShareLink(trip.code), [trip.code]);
+    const appShareLink = useMemo(() => buildTripAppLink(trip.code), [trip.code]);
+    const inviteMessage = useMemo(() => {
+        const titleLine = trip.tripName ? `Trip: ${trip.tripName}` : null;
+        return [
+            'Join my trip on TripCash.',
+            titleLine,
+            `Code: ${trip.code}`,
+            `App link: ${appShareLink}`,
+            `Web link: ${shareLink}`
+        ].filter(Boolean).join('\n');
+    }, [trip.tripName, trip.code, appShareLink, shareLink]);
     const tripDateRange = useMemo(() => {
         const validDates = trip.expenses
             .map((expense) => new Date(expense?.date || ''))
@@ -312,8 +325,9 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
             if (!navigator.clipboard) {
                 throw new Error('Clipboard unavailable');
             }
-            await navigator.clipboard.writeText(shareLink);
-            notify('Trip invite link copied');
+            const textToCopy = isNativePlatform ? inviteMessage : shareLink;
+            await navigator.clipboard.writeText(textToCopy);
+            notify(isNativePlatform ? 'Invite text copied' : 'Trip invite link copied');
             return true;
         } catch {
             notify('Could not copy link');
@@ -326,7 +340,7 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
             if (navigator.share) {
                 await navigator.share({
                     title: `Join trip ${trip.code}`,
-                    text: `Join my trip on TripCash. Trip code: ${trip.code}`,
+                    text: inviteMessage,
                     url: shareLink
                 });
                 return;
@@ -434,9 +448,16 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
                         <div className="qr-container"><QRCodeSVG value={shareLink} size={200} /></div>
                         <p style={{ marginTop: '10px', fontWeight: 800, letterSpacing: '2px' }}>{trip.code}</p>
                         <div className="share-link-box">
+                            {isNativePlatform && (
+                                <>
+                                    <p className="share-link-label">App Deep Link</p>
+                                    <input value={appShareLink} readOnly />
+                                </>
+                            )}
+                            <p className="share-link-label">Web Link</p>
                             <input value={shareLink} readOnly />
                             <div className="share-link-actions">
-                                <CopyButton onCopy={copyShareLink} label="Copy Link" />
+                                <CopyButton onCopy={copyShareLink} label={isNativePlatform ? 'Copy Invite' : 'Copy Link'} />
                                 <button className="btn btn-primary" onClick={shareTripLink}>
                                     <Share2 size={15} /> Share
                                 </button>

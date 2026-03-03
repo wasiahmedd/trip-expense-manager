@@ -40,10 +40,35 @@ body {
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
 }
 
 #root {
   min-height: 100vh;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+.btn,
+.person-row,
+.trip-chip button,
+.bottom-nav button,
+.payer-toggle,
+.split-view-toggle,
+.amount-quick-btn,
+.saved-trip-row,
+.modal-close {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+input,
+textarea,
+[contenteditable='true'] {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .container {
@@ -954,6 +979,15 @@ h3 {
   text-overflow: ellipsis;
 }
 
+.share-link-label {
+  text-align: left;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
 .share-link-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -980,6 +1014,16 @@ h3 {
 
 #reader video {
   border-radius: 12px !important;
+}
+
+.scanner-error {
+  border-radius: 10px;
+  border: 1px solid #6a2b2f;
+  background: #2d1518;
+  color: #ffc8cf;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 @keyframes payer-shine {
