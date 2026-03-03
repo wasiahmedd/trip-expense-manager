@@ -53,6 +53,9 @@ const AuthScreen = () => {
         if (message.includes('default_web_client_id') || message.includes('WILL_BE_OVERRIDDEN')) {
             return 'Google client id is not configured for Android build. Set VITE_FIREBASE_GOOGLE_WEB_CLIENT_ID and rebuild APK.';
         }
+        if (message.toLowerCase().includes('no credentials available')) {
+            return 'No Google credentials available on this device right now. Add a Google account and try again.';
+        }
         if (message.includes('auth/invalid-credential')) {
             return 'Google credential was rejected. Confirm Google provider is enabled in Firebase Authentication.';
         }
@@ -92,21 +95,27 @@ const AuthScreen = () => {
                     throw new Error('Google client id missing for native sign-in.');
                 }
 
-                const signInNative = () =>
+                const signInNative = (useCredentialManager = true) =>
                     FirebaseAuthentication.signInWithGoogle({
-                        skipNativeAuth: true
+                        skipNativeAuth: true,
+                        useCredentialManager
                     });
 
                 let nativeResult;
                 try {
-                    nativeResult = await signInNative();
+                    nativeResult = await signInNative(true);
                 } catch (firstErr) {
                     const firstMessage = String(firstErr?.message || '');
                     if (!firstMessage.includes('plugin is not implemented on android')) {
-                        throw firstErr;
+                        if (firstMessage.toLowerCase().includes('no credentials available')) {
+                            nativeResult = await signInNative(false);
+                        } else {
+                            throw firstErr;
+                        }
+                    } else {
+                        await new Promise((resolve) => setTimeout(resolve, 450));
+                        nativeResult = await signInNative(true);
                     }
-                    await new Promise((resolve) => setTimeout(resolve, 450));
-                    nativeResult = await signInNative();
                 }
                 const idToken = nativeResult?.credential?.idToken || null;
                 const accessToken = nativeResult?.credential?.accessToken || null;
