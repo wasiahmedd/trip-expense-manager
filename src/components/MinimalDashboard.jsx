@@ -46,7 +46,7 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
     const [description, setDescription] = useState('');
     const [showNotification, setShowNotification] = useState(null);
     const [showQR, setShowQR] = useState(false);
-    const [splitDisplayMode, setSplitDisplayMode] = useState('plain');
+    const [splitDisplayMode, setSplitDisplayMode] = useState('color');
 
     const participantNames = useMemo(
         () => Object.fromEntries(trip.participants.map((participant) => [participant.id, participant.name])),
