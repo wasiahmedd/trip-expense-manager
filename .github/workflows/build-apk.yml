@@ -17,6 +17,7 @@ jobs:
       VITE_PUBLIC_APP_URL: ${{ secrets.VITE_PUBLIC_APP_URL }}
       VITE_SOCKET_SERVER_URL: ${{ secrets.VITE_SOCKET_SERVER_URL }}
       GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+      ANDROID_DEBUG_KEYSTORE_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}
 
     steps:
       - name: Checkout
@@ -33,6 +34,34 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
+
+      - name: Restore cached debug signing keystore
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: tripcash-debug-keystore-v1
+
+      - name: Prepare stable debug signing keystore
+        run: |
+          mkdir -p ~/.android
+          if [ -n "${ANDROID_DEBUG_KEYSTORE_B64}" ]; then
+            echo "${ANDROID_DEBUG_KEYSTORE_B64}" | base64 --decode > ~/.android/debug.keystore
+            echo "[workflow] Loaded debug.keystore from ANDROID_DEBUG_KEYSTORE_B64 secret."
+          elif [ ! -f ~/.android/debug.keystore ]; then
+            keytool -genkeypair -v \
+              -keystore ~/.android/debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+            echo "[workflow] Generated new debug.keystore. Cache will keep it for later runs."
+          else
+            echo "[workflow] Reusing cached debug.keystore."
+          fi
+          keytool -list -v -keystore ~/.android/debug.keystore -storepass android | sed -n '/Alias name:/p;/SHA1:/p;/SHA-256:/p'
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
