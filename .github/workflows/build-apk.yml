@@ -74,7 +74,7 @@ jobs:
           fi
 
       - name: Sync Capacitor Android
-        run: npx cap sync android --verbose
+        run: npx cap sync android
 
       - name: Build debug APK
         run: |
