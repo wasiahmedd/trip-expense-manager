@@ -11,7 +11,6 @@ import {
     X,
     FileText,
     Download,
-    Copy,
     AlertTriangle,
     Check
 } from 'lucide-react';
@@ -29,6 +28,7 @@ import {
 } from '../utils/expenseUtils';
 import { getPersonTheme } from '../utils/personColors';
 import { buildTripShareLink } from '../utils/tripLink';
+import CopyButton from './CopyButton';
 
 const parseNumber = (value) => {
     const parsed = parseFloat(value);
@@ -300,8 +300,10 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
             }
             await navigator.clipboard.writeText(documentText);
             notify('Document copied to clipboard');
+            return true;
         } catch {
             notify('Copy failed. Please use export.');
+            return false;
         }
     };
 
@@ -312,8 +314,10 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
             }
             await navigator.clipboard.writeText(shareLink);
             notify('Trip invite link copied');
+            return true;
         } catch {
             notify('Could not copy link');
+            return false;
         }
     };
 
@@ -432,9 +436,7 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
                         <div className="share-link-box">
                             <input value={shareLink} readOnly />
                             <div className="share-link-actions">
-                                <button className="btn btn-secondary" onClick={copyShareLink}>
-                                    <Copy size={15} /> Copy Link
-                                </button>
+                                <CopyButton onCopy={copyShareLink} label="Copy Link" />
                                 <button className="btn btn-primary" onClick={shareTripLink}>
                                     <Share2 size={15} /> Share
                                 </button>
@@ -677,9 +679,7 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
                                 <p>Simple summary for non-technical users. View here or export as text/CSV.</p>
                             </div>
                             <div className="doc-actions">
-                                <button className="btn btn-secondary" onClick={copyDocumentText}>
-                                    <Copy size={16} /> Copy
-                                </button>
+                                <CopyButton onCopy={copyDocumentText} label="Copy" />
                                 <button className="btn btn-secondary" onClick={downloadReadableDocument}>
                                     <Download size={16} /> TXT
                                 </button>

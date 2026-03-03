@@ -96,6 +96,43 @@ body {
   color: var(--text-primary);
 }
 
+.copy-anim-btn {
+  gap: 8px;
+}
+
+.copy-icon-wrap {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.copy-icon {
+  position: absolute;
+  top: 0;
+  left: 0;
+  stroke-dasharray: 50;
+  transition: all 300ms ease-in-out;
+}
+
+.copy-icon-clippy {
+  color: var(--text-secondary);
+  stroke-dashoffset: 0;
+}
+
+.copy-icon-clippy.is-copied {
+  stroke-dashoffset: -50;
+}
+
+.copy-icon-check {
+  color: #43d17d;
+  stroke-dashoffset: -50;
+}
+
+.copy-icon-check.is-copied {
+  stroke-dashoffset: 0;
+}
+
 input,
 select {
   width: 100%;
