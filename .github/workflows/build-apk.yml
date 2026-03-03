@@ -16,6 +16,7 @@ jobs:
       VITE_FIREBASE_GOOGLE_WEB_CLIENT_ID: ${{ secrets.VITE_FIREBASE_GOOGLE_WEB_CLIENT_ID }}
       VITE_PUBLIC_APP_URL: ${{ secrets.VITE_PUBLIC_APP_URL }}
       VITE_SOCKET_SERVER_URL: ${{ secrets.VITE_SOCKET_SERVER_URL }}
+      GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
 
     steps:
       - name: Checkout
@@ -75,6 +76,15 @@ jobs:
         run: |
           if [ ! -d android ]; then
             npx cap add android
+          fi
+
+      - name: Write google-services.json
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            echo "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+            echo "[workflow] Wrote google-services.json"
+          else
+            echo "Warning: GOOGLE_SERVICES_JSON secret is not set. Firebase native auth will be disabled."
           fi
 
       - name: Prepare Android Google auth resource
