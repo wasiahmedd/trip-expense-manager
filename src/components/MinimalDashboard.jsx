@@ -298,7 +298,7 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
                                             style={{ background: isPayer ? 'rgba(0, 0, 0, 0.32)' : 'rgba(255, 255, 255, 0.20)' }}
                                             aria-label={`Toggle payer for ${participant.name}`}
                                         >
-                                            <IndianRupee size={16} />
+                                            <IndianRupee size={16} className={isPayer ? 'payer-icon-anim' : ''} />
                                         </button>
                                     </div>
 
