@@ -1,5 +1,13 @@
 {
   "appId": "com.tripcash.app",
   "appName": "TripCash",
-  "webDir": "dist"
+  "webDir": "dist",
+  "plugins": {
+    "FirebaseAuthentication": {
+      "skipNativeAuth": true,
+      "providers": [
+        "google.com"
+      ]
+    }
+  }
 }

@@ -1,14 +1,17 @@
 import React, { useMemo, useState } from 'react';
 import {
     createUserWithEmailAndPassword,
+    GoogleAuthProvider,
     signInWithEmailAndPassword,
+    signInWithCredential,
     signInWithRedirect,
     signInWithPopup,
     updateProfile
 } from 'firebase/auth';
 import { Capacitor } from '@capacitor/core';
+import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { Lock, LogIn, Mail, User, UserPlus } from 'lucide-react';
-import { auth, googleProvider, hasFirebaseConfig } from '../config/firebase';
+import { auth, googleProvider, hasFirebaseConfig, hasNativeGoogleClientId } from '../config/firebase';
 
 const extractNameFromEmail = (email) => {
     if (!email || !email.includes('@')) return 'Trip User';
@@ -17,6 +20,7 @@ const extractNameFromEmail = (email) => {
 
 const AuthScreen = () => {
     const isNativePlatform = Capacitor.isNativePlatform();
+    const canUseNativeGoogle = isNativePlatform && hasNativeGoogleClientId;
     const [mode, setMode] = useState('login');
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
@@ -39,8 +43,15 @@ const AuthScreen = () => {
             return 'Firebase auth provider is not configured. Enable Email/Password and Google in Firebase Authentication, then restart the app.';
         }
         if (message.includes('auth/popup-blocked')) return 'Popup blocked. Allow popups and try Google login again.';
+        if (message.includes('auth/popup-closed-by-user')) return 'Google sign-in cancelled.';
         if (message.includes('missing initial state')) {
             return 'Google sign-in redirect failed in this environment. Please use email/password in the APK.';
+        }
+        if (message.includes('default_web_client_id') || message.includes('WILL_BE_OVERRIDDEN')) {
+            return 'Google client id is not configured for Android build. Set VITE_FIREBASE_GOOGLE_WEB_CLIENT_ID and rebuild APK.';
+        }
+        if (message.includes('auth/invalid-credential')) {
+            return 'Google credential was rejected. Confirm Google provider is enabled in Firebase Authentication.';
         }
         return message.replace('Firebase: ', '');
     };
@@ -69,14 +80,33 @@ const AuthScreen = () => {
 
     const handleGoogleLogin = async () => {
         if (!hasFirebaseConfig || !auth || !googleProvider) return;
-        if (isNativePlatform) {
-            setError('Google sign-in is not supported in this APK build yet. Use email/password for now.');
-            return;
-        }
 
         setError('');
         setIsBusy(true);
         try {
+            if (isNativePlatform) {
+                if (!canUseNativeGoogle) {
+                    throw new Error('Google client id missing for native sign-in.');
+                }
+
+                const nativeResult = await FirebaseAuthentication.signInWithGoogle({
+                    skipNativeAuth: true
+                });
+                const idToken = nativeResult?.credential?.idToken || null;
+                const accessToken = nativeResult?.credential?.accessToken || null;
+                if (!idToken && !accessToken) {
+                    throw new Error('Google sign-in returned no usable credential.');
+                }
+
+                const firebaseCredential = GoogleAuthProvider.credential(idToken, accessToken);
+                const credential = await signInWithCredential(auth, firebaseCredential);
+                if (!credential.user.displayName) {
+                    const fallbackName = extractNameFromEmail(credential.user.email || '');
+                    await updateProfile(credential.user, { displayName: fallbackName });
+                }
+                return;
+            }
+
             const credential = await signInWithPopup(auth, googleProvider);
             if (!credential.user.displayName) {
                 const fallbackName = extractNameFromEmail(credential.user.email || '');
@@ -84,6 +114,13 @@ const AuthScreen = () => {
             }
         } catch (err) {
             const message = String(err?.message || '');
+            if (
+                message.toLowerCase().includes('cancel') ||
+                message.includes('SIGN_IN_CANCELLED') ||
+                message.includes('auth/popup-closed-by-user')
+            ) {
+                return;
+            }
             if (message.includes('auth/popup-blocked') || message.includes('auth/operation-not-supported-in-this-environment')) {
                 await signInWithRedirect(auth, googleProvider);
                 return;
@@ -105,9 +142,9 @@ const AuthScreen = () => {
                         Firebase config missing. Add `VITE_FIREBASE_*` values in `.env` to enable login.
                     </div>
                 )}
-                {isNativePlatform && (
+                {isNativePlatform && !canUseNativeGoogle && (
                     <div className="auth-alert">
-                        Google sign-in is disabled in this APK build. Please use email + password.
+                        Native Google login needs `VITE_FIREBASE_GOOGLE_WEB_CLIENT_ID` in APK build env.
                     </div>
                 )}
 
@@ -172,7 +209,7 @@ const AuthScreen = () => {
 
                 <div className="auth-divider"><span>or</span></div>
 
-                <button className="btn btn-secondary auth-google-btn" onClick={handleGoogleLogin} disabled={isBusy || !hasFirebaseConfig || isNativePlatform}>
+                <button className="btn btn-secondary auth-google-btn" onClick={handleGoogleLogin} disabled={isBusy || !hasFirebaseConfig || (isNativePlatform && !canUseNativeGoogle)}>
                     <img
                         src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
                         alt="Google"

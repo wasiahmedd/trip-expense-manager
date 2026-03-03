@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
+import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { onAuthStateChanged, signOut, updateProfile } from 'firebase/auth';
 import AuthScreen from './components/AuthScreen';
 import Onboarding from './components/Onboarding';
@@ -237,6 +238,13 @@ function App() {
 
     const handleLogout = async () => {
         if (!auth) return;
+        if (isNativePlatform) {
+            try {
+                await FirebaseAuthentication.signOut();
+            } catch {
+                // Ignore native sign-out errors and continue with web auth sign-out.
+            }
+        }
         await signOut(auth);
     };
 

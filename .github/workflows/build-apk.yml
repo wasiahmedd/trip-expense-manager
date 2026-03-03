@@ -13,6 +13,7 @@ jobs:
       VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
       VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
       VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+      VITE_FIREBASE_GOOGLE_WEB_CLIENT_ID: ${{ secrets.VITE_FIREBASE_GOOGLE_WEB_CLIENT_ID }}
       VITE_PUBLIC_APP_URL: ${{ secrets.VITE_PUBLIC_APP_URL }}
       VITE_SOCKET_SERVER_URL: ${{ secrets.VITE_SOCKET_SERVER_URL }}
 
@@ -58,6 +59,9 @@ jobs:
           if [ -z "${VITE_PUBLIC_APP_URL}" ]; then
             echo "Warning: VITE_PUBLIC_APP_URL is not set. Share links may use fallback origin."
           fi
+          if [ -z "${VITE_FIREBASE_GOOGLE_WEB_CLIENT_ID}" ]; then
+            echo "Warning: VITE_FIREBASE_GOOGLE_WEB_CLIENT_ID is not set. Google sign-in in APK will be disabled."
+          fi
 
       - name: Build web assets
         run: npm run build
@@ -72,6 +76,9 @@ jobs:
           if [ ! -d android ]; then
             npx cap add android
           fi
+
+      - name: Prepare Android Google auth resource
+        run: node scripts/prepare-android-google-auth.cjs
 
       - name: Sync Capacitor Android
         run: npx cap sync android

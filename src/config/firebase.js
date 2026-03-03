@@ -10,6 +10,9 @@ const firebaseConfig = {
     appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
+export const nativeGoogleWebClientId = String(import.meta.env.VITE_FIREBASE_GOOGLE_WEB_CLIENT_ID || '').trim();
+export const hasNativeGoogleClientId = nativeGoogleWebClientId.length > 0;
+
 export const hasFirebaseConfig = Object.values(firebaseConfig).every(
     (value) => typeof value === 'string' && value.trim().length > 0
 );
