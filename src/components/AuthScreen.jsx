@@ -20,10 +20,7 @@ const extractNameFromEmail = (email) => {
 
 const AuthScreen = () => {
     const isNativePlatform = Capacitor.isNativePlatform();
-    const isNativeFirebaseAuthAvailable =
-        !isNativePlatform || Capacitor.isPluginAvailable('FirebaseAuthentication');
-    const canUseNativeGoogle =
-        isNativePlatform && hasNativeGoogleClientId && isNativeFirebaseAuthAvailable;
+    const canUseNativeGoogle = isNativePlatform && hasNativeGoogleClientId;
     const [mode, setMode] = useState('login');
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
@@ -86,10 +83,6 @@ const AuthScreen = () => {
 
     const handleGoogleLogin = async () => {
         if (!hasFirebaseConfig || !auth || !googleProvider) return;
-        if (isNativePlatform && !isNativeFirebaseAuthAvailable) {
-            setError('This APK is outdated for Google login. Install the latest APK build.');
-            return;
-        }
 
         setError('');
         setIsBusy(true);
@@ -99,9 +92,22 @@ const AuthScreen = () => {
                     throw new Error('Google client id missing for native sign-in.');
                 }
 
-                const nativeResult = await FirebaseAuthentication.signInWithGoogle({
-                    skipNativeAuth: true
-                });
+                const signInNative = () =>
+                    FirebaseAuthentication.signInWithGoogle({
+                        skipNativeAuth: true
+                    });
+
+                let nativeResult;
+                try {
+                    nativeResult = await signInNative();
+                } catch (firstErr) {
+                    const firstMessage = String(firstErr?.message || '');
+                    if (!firstMessage.includes('plugin is not implemented on android')) {
+                        throw firstErr;
+                    }
+                    await new Promise((resolve) => setTimeout(resolve, 450));
+                    nativeResult = await signInNative();
+                }
                 const idToken = nativeResult?.credential?.idToken || null;
                 const accessToken = nativeResult?.credential?.accessToken || null;
                 if (!idToken && !accessToken) {
@@ -152,12 +158,7 @@ const AuthScreen = () => {
                         Firebase config missing. Add `VITE_FIREBASE_*` values in `.env` to enable login.
                     </div>
                 )}
-                {isNativePlatform && !isNativeFirebaseAuthAvailable && (
-                    <div className="auth-alert">
-                        This installed APK is missing native Google auth plugin. Reinstall latest APK.
-                    </div>
-                )}
-                {isNativePlatform && isNativeFirebaseAuthAvailable && !canUseNativeGoogle && (
+                {isNativePlatform && !canUseNativeGoogle && (
                     <div className="auth-alert">
                         Native Google login needs `VITE_FIREBASE_GOOGLE_WEB_CLIENT_ID` in APK build env.
                     </div>
