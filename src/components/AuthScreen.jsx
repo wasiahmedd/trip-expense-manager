@@ -35,7 +35,11 @@ const AuthScreen = () => {
     }, [mode]);
 
     const mapError = (message) => {
-        if (!message) return 'Authentication failed.';
+        const normalizedMessage = String(message || '').trim();
+        if (!normalizedMessage) return 'Authentication failed.';
+        if (normalizedMessage.startsWith('10:') || normalizedMessage.includes('DEVELOPER_ERROR')) {
+            return 'Google sign-in failed (code 10). Add this APK signing SHA-1/SHA-256 to Firebase Android app, refresh GOOGLE_SERVICES_JSON secret, then rebuild APK.';
+        }
         if (message.includes('auth/invalid-credential')) return 'Email or password is incorrect.';
         if (message.includes('auth/email-already-in-use')) return 'This email is already registered.';
         if (message.includes('auth/weak-password')) return 'Password should be at least 6 characters.';
@@ -59,7 +63,7 @@ const AuthScreen = () => {
         if (message.includes('auth/invalid-credential')) {
             return 'Google credential was rejected. Confirm Google provider is enabled in Firebase Authentication.';
         }
-        return message.replace('Firebase: ', '');
+        return normalizedMessage.replace('Firebase: ', '');
     };
 
     const handleEmailAuth = async (event) => {
@@ -139,6 +143,8 @@ const AuthScreen = () => {
             }
         } catch (err) {
             const message = String(err?.message || '');
+            const code = String(err?.code || '');
+            const combinedMessage = `${code ? `${code}: ` : ''}${message}`.trim();
             if (
                 message.toLowerCase().includes('cancel') ||
                 message.includes('SIGN_IN_CANCELLED') ||
@@ -150,7 +156,7 @@ const AuthScreen = () => {
                 await signInWithRedirect(auth, googleProvider);
                 return;
             }
-            setError(mapError(message));
+            setError(mapError(combinedMessage));
         } finally {
             setIsBusy(false);
         }
