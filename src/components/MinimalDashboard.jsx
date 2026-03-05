@@ -134,9 +134,9 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
                 if (!involved.has(myId) || !involved.has(otherId)) continue;
 
                 const label = expense.description?.trim() || 'General Expense';
-                if (!entries.includes(label)) {
-                    entries.push(label);
-                }
+                const perHead = splitIds.length > 0 ? parseNumber(expense.amount) / splitIds.length : 0;
+                const share = splitIds.includes(otherId) ? perHead : 0;
+                entries.push({ label, share });
                 if (entries.length === 4) break;
             }
             return entries;
@@ -613,20 +613,6 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
                             <Wallet size={24} color="var(--text-secondary)" />
                         </div>
 
-                        <h3 className="section-title">CURRENT BALANCES</h3>
-                        {trip.participants.map((participant, index) => {
-                            const theme = getPersonTheme(index);
-                            const balance = balances[participant.id] || 0;
-                            return (
-                                <div key={participant.id} className="balance-row" style={{ background: theme.bg, borderColor: theme.accent }}>
-                                    <span style={{ color: theme.text }}>{participant.name}</span>
-                                    <strong style={{ color: balance >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                                        {balance >= 0 ? '+' : ''}{money(balance)}
-                                    </strong>
-                                </div>
-                            );
-                        })}
-
                         <h3 className="section-title">WHO SPENT HOW MUCH</h3>
                         {trip.participants.map((participant, index) => {
                             const theme = getPersonTheme(index);
@@ -676,9 +662,9 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
                                 </div>
                                 {action.relatedEntries.length > 0 && (
                                     <div className="my-settlement-entry-tags">
-                                        {action.relatedEntries.map((entryName, tagIndex) => (
+                                        {action.relatedEntries.map((entry, tagIndex) => (
                                             <span key={`entry-tag-${action.otherId || 'x'}-${tagIndex}`} className="my-settlement-entry-tag">
-                                                {entryName}
+                                                {entry.label} • Share {money(entry.share)}
                                             </span>
                                         ))}
                                     </div>
