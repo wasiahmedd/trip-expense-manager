@@ -7,6 +7,7 @@ import { onAuthStateChanged, signOut, updateProfile } from 'firebase/auth';
 import AuthScreen from './components/AuthScreen';
 import Onboarding from './components/Onboarding';
 import MinimalDashboard from './components/MinimalDashboard';
+import BottomAdBar from './components/BottomAdBar';
 import { auth, hasFirebaseConfig } from './config/firebase';
 import { extractTripCodeFromInput } from './utils/tripLink';
 
@@ -40,6 +41,7 @@ function App() {
     const [notification, setNotification] = useState(null);
     const [inviteCode, setInviteCode] = useState(initialInviteCode);
     const [attemptedInviteCode, setAttemptedInviteCode] = useState('');
+    const [isAdBarVisible, setIsAdBarVisible] = useState(false);
     const myIdRef = useRef('');
 
     const defaultName = useMemo(() => {
@@ -272,7 +274,14 @@ function App() {
     }, [trip, inviteCode]);
 
     return (
-        <div style={{ minHeight: '100vh', color: 'var(--text-primary)' }}>
+        <div
+            style={{
+                minHeight: '100vh',
+                color: 'var(--text-primary)',
+                paddingBottom: 'var(--ad-bar-space, 0px)',
+                '--ad-bar-space': isAdBarVisible ? '84px' : '0px'
+            }}
+        >
             {error && (
                 <div
                     style={{
@@ -338,6 +347,7 @@ function App() {
                     onExitTrip={handleLeaveTrip}
                 />
             )}
+            <BottomAdBar enabled={Boolean(user && trip) && !isNativePlatform} onVisibleChange={setIsAdBarVisible} />
         </div>
     );
 }

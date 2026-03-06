@@ -198,7 +198,7 @@ h3 {
 
 .dashboard-shell {
   max-width: 760px;
-  padding-bottom: 120px;
+  padding-bottom: calc(120px + var(--ad-bar-space, 0px));
 }
 
 .dashboard-header {
@@ -867,7 +867,7 @@ h3 {
 
 .bottom-nav {
   position: fixed;
-  bottom: 18px;
+  bottom: calc(18px + var(--ad-bar-space, 0px));
   left: max(12px, env(safe-area-inset-left));
   right: max(12px, env(safe-area-inset-right));
   height: 70px;
@@ -902,7 +902,7 @@ h3 {
 
 .toast {
   position: fixed;
-  bottom: 96px;
+  bottom: calc(96px + var(--ad-bar-space, 0px));
   left: 50%;
   transform: translateX(-50%);
   display: inline-flex;
@@ -916,6 +916,78 @@ h3 {
   font-size: 12px;
   font-weight: 700;
   z-index: 120;
+}
+
+.ad-bottom-bar {
+  position: fixed;
+  left: max(12px, env(safe-area-inset-left));
+  right: max(12px, env(safe-area-inset-right));
+  bottom: max(8px, env(safe-area-inset-bottom));
+  z-index: 95;
+}
+
+.ad-bottom-bar-inner {
+  border-radius: 14px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 8px 10px;
+}
+
+.ad-bottom-bar-tag {
+  border-radius: 999px;
+  border: 1px solid #2f3c4f;
+  background: #141a22;
+  color: #8ea1b8;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 3px 7px;
+}
+
+.ad-bottom-bar-content {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ad-bottom-bar-slot {
+  min-height: 36px;
+}
+
+.ad-bottom-bar-placeholder {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ad-bottom-bar-dismiss {
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  background: #181d25;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 7px 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.ad-bottom-bar-dismiss:hover {
+  color: var(--text-primary);
+  border-color: #3f4b5f;
+}
+
+.ad-bottom-bar-hint {
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: center;
 }
 
 .person-bar-refined {
@@ -1278,7 +1350,7 @@ h3 {
   }
 
   .dashboard-shell {
-    padding-bottom: 112px;
+    padding-bottom: calc(112px + var(--ad-bar-space, 0px));
   }
 
   .doc-head {
@@ -1317,6 +1389,16 @@ h3 {
 
   .account-logout-text {
     display: none;
+  }
+
+  .ad-bottom-bar-inner {
+    grid-template-columns: 1fr auto;
+    row-gap: 6px;
+  }
+
+  .ad-bottom-bar-tag {
+    grid-column: 1 / -1;
+    justify-self: start;
   }
 }
 
