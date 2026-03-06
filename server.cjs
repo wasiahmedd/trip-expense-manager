@@ -4,6 +4,7 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const { Pool } = require('pg');
 
 const DIST_DIR = path.join(__dirname, 'dist');
 const DIST_INDEX_PATH = path.join(DIST_DIR, 'index.html');
@@ -43,41 +44,147 @@ const io = new Server(server, {
 
 const DATA_DIR = path.join(__dirname, 'data');
 const STORE_PATH = path.join(DATA_DIR, 'store.json');
+const DATABASE_URL = process.env.DATABASE_URL || '';
+const STORE_ROW_ID = 1;
 
 const createEmptyStore = () => ({
     trips: {},
     userTrips: {}
 });
 
-const loadStore = () => {
+const normalizeStore = (value) => ({
+    trips: value?.trips && typeof value.trips === 'object' ? value.trips : {},
+    userTrips: value?.userTrips && typeof value.userTrips === 'object' ? value.userTrips : {}
+});
+
+const loadStoreFromFile = () => {
     try {
         if (!fs.existsSync(STORE_PATH)) return createEmptyStore();
         const content = fs.readFileSync(STORE_PATH, 'utf8');
         const parsed = JSON.parse(content);
-        return {
-            trips: parsed?.trips && typeof parsed.trips === 'object' ? parsed.trips : {},
-            userTrips: parsed?.userTrips && typeof parsed.userTrips === 'object' ? parsed.userTrips : {}
-        };
+        return normalizeStore(parsed);
     } catch (err) {
         console.error('Failed to load store.json. Starting with empty store.', err);
         return createEmptyStore();
     }
 };
 
-const store = loadStore();
-const trips = store.trips;
-const userTrips = store.userTrips;
-
-const socketUsers = {};
-const userSockets = {};
-
-const saveStore = () => {
+const saveStoreToFile = (snapshot) => {
     try {
         fs.mkdirSync(DATA_DIR, { recursive: true });
-        fs.writeFileSync(STORE_PATH, JSON.stringify({ trips, userTrips }, null, 2), 'utf8');
+        fs.writeFileSync(STORE_PATH, JSON.stringify(snapshot, null, 2), 'utf8');
     } catch (err) {
         console.error('Failed to save store.json:', err);
     }
+};
+
+const trips = {};
+const userTrips = {};
+const socketUsers = {};
+const userSockets = {};
+
+let dbPool = null;
+let isDatabaseStoreEnabled = false;
+let storeWriteQueue = Promise.resolve();
+
+const replaceStoreInMemory = (store) => {
+    Object.keys(trips).forEach((code) => delete trips[code]);
+    Object.assign(trips, store.trips);
+
+    Object.keys(userTrips).forEach((uid) => delete userTrips[uid]);
+    Object.assign(userTrips, store.userTrips);
+};
+
+const createDatabasePool = async () => {
+    if (!DATABASE_URL) return null;
+
+    const connectionOptions = { connectionString: DATABASE_URL };
+    const shouldUseSsl = process.env.PGSSL === 'true' || process.env.NODE_ENV === 'production';
+    if (shouldUseSsl) {
+        connectionOptions.ssl = { rejectUnauthorized: false };
+    }
+
+    const pool = new Pool(connectionOptions);
+    await pool.query('SELECT 1');
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS app_store (
+            id INTEGER PRIMARY KEY,
+            data JSONB NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    `);
+    return pool;
+};
+
+const loadStoreFromDatabase = async () => {
+    const selectResult = await dbPool.query('SELECT data FROM app_store WHERE id = $1', [STORE_ROW_ID]);
+    if (selectResult.rowCount === 0) {
+        const emptyStore = createEmptyStore();
+        await dbPool.query(
+            'INSERT INTO app_store (id, data, updated_at) VALUES ($1, $2::jsonb, NOW())',
+            [STORE_ROW_ID, JSON.stringify(emptyStore)]
+        );
+        return emptyStore;
+    }
+
+    const rawData = selectResult.rows[0]?.data;
+    const parsed = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
+    return normalizeStore(parsed);
+};
+
+const saveStoreToDatabase = async (serializedStore) => {
+    await dbPool.query(
+        `
+            INSERT INTO app_store (id, data, updated_at)
+            VALUES ($1, $2::jsonb, NOW())
+            ON CONFLICT (id)
+            DO UPDATE SET data = EXCLUDED.data, updated_at = NOW();
+        `,
+        [STORE_ROW_ID, serializedStore]
+    );
+};
+
+const initializePersistence = async () => {
+    if (!DATABASE_URL) {
+        replaceStoreInMemory(loadStoreFromFile());
+        console.log(`Using file store at ${STORE_PATH}.`);
+        return;
+    }
+
+    try {
+        dbPool = await createDatabasePool();
+        const store = await loadStoreFromDatabase();
+        replaceStoreInMemory(store);
+        isDatabaseStoreEnabled = true;
+        console.log('Using Postgres store via DATABASE_URL.');
+    } catch (err) {
+        console.error('Failed to initialize Postgres store. Falling back to file storage.', err);
+        if (dbPool) {
+            try {
+                await dbPool.end();
+            } catch {
+                // Ignore close errors during fallback.
+            }
+            dbPool = null;
+        }
+        replaceStoreInMemory(loadStoreFromFile());
+    }
+};
+
+const saveStore = () => {
+    const snapshot = { trips, userTrips };
+
+    if (isDatabaseStoreEnabled && dbPool) {
+        const serializedStore = JSON.stringify(snapshot);
+        storeWriteQueue = storeWriteQueue
+            .then(() => saveStoreToDatabase(serializedStore))
+            .catch((err) => {
+                console.error('Failed to save store to Postgres:', err);
+            });
+        return;
+    }
+
+    saveStoreToFile(snapshot);
 };
 
 const generateCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -420,6 +527,42 @@ io.on('connection', (socket) => {
 });
 
 const PORT = Number(process.env.PORT) || 3001;
-server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on all interfaces at port ${PORT}`);
+
+const closePersistence = async () => {
+    if (isDatabaseStoreEnabled) {
+        try {
+            await storeWriteQueue;
+        } catch {
+            // Ignore pending write queue errors during shutdown.
+        }
+    }
+
+    if (dbPool) {
+        try {
+            await dbPool.end();
+        } catch (err) {
+            console.error('Failed to close Postgres pool cleanly:', err);
+        }
+    }
+};
+
+const startServer = async () => {
+    await initializePersistence();
+    server.listen(PORT, '0.0.0.0', () => {
+        console.log(`Server running on all interfaces at port ${PORT}`);
+    });
+};
+
+const handleShutdown = (signal) => {
+    console.log(`Received ${signal}. Shutting down gracefully...`);
+    closePersistence()
+        .finally(() => process.exit(0));
+};
+
+process.on('SIGINT', () => handleShutdown('SIGINT'));
+process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+
+startServer().catch((err) => {
+    console.error('Server startup failed:', err);
+    process.exit(1);
 });
