@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import {
     ChevronLeft,
@@ -29,7 +29,11 @@ import {
 } from '../utils/expenseUtils';
 import { getPersonTheme } from '../utils/personColors';
 import { buildTripAppLink, buildTripShareLink } from '../utils/tripLink';
+import { canShowInlineAd, registerInlineAdShown } from '../utils/inlineAdPolicy';
 import CopyButton from './CopyButton';
+import ExpenseSuccessAdCard from './ExpenseSuccessAdCard';
+import BalanceAdCard from './BalanceAdCard';
+import SettlementAdCard from './SettlementAdCard';
 
 const parseNumber = (value) => {
     const parsed = parseFloat(value);
@@ -45,8 +49,11 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
     const [amount, setAmount] = useState('');
     const [description, setDescription] = useState('');
     const [showNotification, setShowNotification] = useState(null);
+    const [showExpenseSuccessMessage, setShowExpenseSuccessMessage] = useState(false);
+    const [activeInlineAd, setActiveInlineAd] = useState('');
     const [showQR, setShowQR] = useState(false);
     const [splitDisplayMode, setSplitDisplayMode] = useState('color');
+    const expenseSuccessTimeoutRef = useRef(null);
 
     const participantNames = useMemo(
         () => Object.fromEntries(trip.participants.map((participant) => [participant.id, participant.name])),
@@ -90,6 +97,8 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
         [trip, balances, settlements]
     );
     const isNativePlatform = useMemo(() => Capacitor.isNativePlatform(), []);
+    const adProvider = useMemo(() => (import.meta.env.VITE_AD_PROVIDER || 'adsense').trim().toLowerCase(), []);
+    const areInlineAdsEnabled = adProvider === 'adsense' && !isNativePlatform;
     const shareLink = useMemo(() => buildTripShareLink(trip.code), [trip.code]);
     const appShareLink = useMemo(() => buildTripAppLink(trip.code), [trip.code]);
     const inviteMessage = useMemo(() => {
@@ -172,6 +181,14 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
         payerIds.every((payerId) => parseNumber(payerAmounts[payerId]) > 0) &&
         !payerMismatch;
 
+    useEffect(() => {
+        return () => {
+            if (expenseSuccessTimeoutRef.current) {
+                window.clearTimeout(expenseSuccessTimeoutRef.current);
+            }
+        };
+    }, []);
+
     const alignSinglePayerAmount = (nextPayers) => {
         const nextPayerIds = Object.keys(nextPayers);
         if (nextPayerIds.length !== 1) {
@@ -196,6 +213,10 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
         setPayerAmounts({});
         setAmount('');
         setDescription('');
+        if (expenseSuccessTimeoutRef.current) {
+            window.clearTimeout(expenseSuccessTimeoutRef.current);
+        }
+        setShowExpenseSuccessMessage(false);
     };
 
     const toggleParticipant = (personId) => {
@@ -251,11 +272,46 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
     };
 
     const handleAmountChange = (value) => {
+        if (showExpenseSuccessMessage) {
+            setShowExpenseSuccessMessage(false);
+        }
         setAmount(value);
         if (payerIds.length === 1) {
             const onlyPayer = payerIds[0];
             setPayerAmounts((prev) => ({ ...prev, [onlyPayer]: value }));
         }
+    };
+
+    const openEntryTab = () => {
+        setActiveTab('entry');
+        if (activeInlineAd !== 'expense_confirmation_ad') {
+            setActiveInlineAd('');
+        }
+    };
+
+    const openBalancesTab = () => {
+        setActiveTab('balances');
+        if (expenseSuccessTimeoutRef.current) {
+            window.clearTimeout(expenseSuccessTimeoutRef.current);
+        }
+        setShowExpenseSuccessMessage(false);
+        const placement = settlements.length > 0 ? 'trip_end_settlement_ad' : 'balance_summary_ad';
+        if (!areInlineAdsEnabled || !canShowInlineAd(placement)) return;
+        setActiveInlineAd(placement);
+    };
+
+    const openDocumentTab = () => {
+        setActiveTab('document');
+        if (expenseSuccessTimeoutRef.current) {
+            window.clearTimeout(expenseSuccessTimeoutRef.current);
+        }
+        setShowExpenseSuccessMessage(false);
+        setActiveInlineAd('');
+    };
+
+    const onInlineAdRendered = (placement) => {
+        if (!placement) return;
+        registerInlineAdShown(placement);
     };
 
     const handleSave = () => {
@@ -276,6 +332,16 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
         setPayerAmounts({});
         setAmount('');
         setDescription('');
+        setShowExpenseSuccessMessage(true);
+        if (expenseSuccessTimeoutRef.current) {
+            window.clearTimeout(expenseSuccessTimeoutRef.current);
+        }
+        expenseSuccessTimeoutRef.current = window.setTimeout(() => {
+            setShowExpenseSuccessMessage(false);
+        }, 15000);
+        if (areInlineAdsEnabled && canShowInlineAd('expense_confirmation_ad')) {
+            setActiveInlineAd('expense_confirmation_ad');
+        }
         notify('Spending entry saved');
     };
 
@@ -492,6 +558,17 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
                             <button className="btn btn-secondary" onClick={clearAll}>Reset</button>
                         </div>
 
+                        {showExpenseSuccessMessage && (
+                            <section className="glass-panel expense-success-panel">
+                                <p className="expense-success-message">
+                                    <CheckCircle size={16} /> Spending entry saved successfully.
+                                </p>
+                                {activeInlineAd === 'expense_confirmation_ad' && (
+                                    <ExpenseSuccessAdCard onAdRendered={() => onInlineAdRendered('expense_confirmation_ad')} />
+                                )}
+                            </section>
+                        )}
+
                         {trip.participants.map((participant, index) => {
                             const theme = getPersonTheme(index);
                             const isSelected = selectedIds.includes(participant.id);
@@ -552,7 +629,12 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
                                     type="text"
                                     placeholder="Dinner, cab, hotel"
                                     value={description}
-                                    onChange={(event) => setDescription(event.target.value)}
+                                    onChange={(event) => {
+                                        if (showExpenseSuccessMessage) {
+                                            setShowExpenseSuccessMessage(false);
+                                        }
+                                        setDescription(event.target.value);
+                                    }}
                                 />
                             </div>
                             <div className="amount-wrap">
@@ -612,6 +694,9 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
                             </div>
                             <Wallet size={24} color="var(--text-secondary)" />
                         </div>
+                        {activeInlineAd === 'balance_summary_ad' && (
+                            <BalanceAdCard onAdRendered={() => onInlineAdRendered('balance_summary_ad')} />
+                        )}
 
                         <h3 className="section-title">WHO SPENT HOW MUCH</h3>
                         {trip.participants.map((participant, index) => {
@@ -637,6 +722,9 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
                             <div className="glass-panel" style={{ padding: '14px', color: 'var(--text-secondary)' }}>
                                 Everyone is settled.
                             </div>
+                        )}
+                        {activeInlineAd === 'trip_end_settlement_ad' && (
+                            <SettlementAdCard onAdRendered={() => onInlineAdRendered('trip_end_settlement_ad')} />
                         )}
 
                         <h3 className="section-title">FOR YOU: WHO TO PAY / WHO PAYS YOU</h3>
@@ -780,9 +868,9 @@ const MinimalDashboard = ({ trip, myId, onAddExpense, onExitTrip }) => {
             )}
 
             <nav className="glass-panel bottom-nav">
-                <button onClick={() => setActiveTab('entry')} className={activeTab === 'entry' ? 'active' : ''}><Users size={20} /><span>Entry</span></button>
-                <button onClick={() => setActiveTab('balances')} className={activeTab === 'balances' ? 'active' : ''}><IndianRupee size={20} /><span>Balances</span></button>
-                <button onClick={() => setActiveTab('document')} className={activeTab === 'document' ? 'active' : ''}><FileText size={20} /><span>Document</span></button>
+                <button onClick={openEntryTab} className={activeTab === 'entry' ? 'active' : ''}><Users size={20} /><span>Entry</span></button>
+                <button onClick={openBalancesTab} className={activeTab === 'balances' ? 'active' : ''}><IndianRupee size={20} /><span>Balances</span></button>
+                <button onClick={openDocumentTab} className={activeTab === 'document' ? 'active' : ''}><FileText size={20} /><span>Document</span></button>
             </nav>
         </div>
     );
